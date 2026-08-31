@@ -42,16 +42,30 @@
 /* Private variables ---------------------------------------------------------*/
 I2C_HandleTypeDef hi2c1;
 
+UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 
-uint8_t who_am_i   = 0;
+
+/* ------------------------Variables glovales para el IMU ----------------------------------------- */
+uint8_t who_am_i   = 0; //
 uint8_t config     = 0;
 uint8_t buffer[6]  = {0};
 int16_t acc_x, acc_y, acc_z;
 float   acc_x_g, acc_y_g, acc_z_g;
 char    uart_buf[64];
+/* ------------------------Variables glovales para el IMU ----------------------------------------- */
+
+
+/* ------------------------Variables glovales para el GPS ----------------------------------------- */
+uint8_t gps_rx_byte;
+char gps_line_buffer[100];
+uint8_t gps_line_index = 0;
+volatile uint8_t gps_line_ready = 0; //Necesario que sea volatile
+/* ------------------------Variables glovales para el IMU ----------------------------------------- */
+
+
 
 
 /* USER CODE END PV */
@@ -61,6 +75,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_USART2_UART_Init(void);
+static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -119,6 +134,7 @@ int main(void)
   MX_GPIO_Init();
   MX_I2C1_Init();
   MX_USART2_UART_Init();
+  MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
   printf("Sistema antes iniciado\r\n");
@@ -154,6 +170,12 @@ int main(void)
   HAL_Delay(10); // esperar a que el sensor arranque
   printf("Sistema iniciado\r\n");
 
+
+
+
+
+  HAL_UART_Receive_IT(&huart1, &gps_rx_byte, 1);
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -161,10 +183,12 @@ int main(void)
   while (1)
   {
 	  // Leer 6 bytes del acelerómetro desde OUTX_L_A (0x28)
-	      HAL_I2C_Mem_Read(&hi2c1, 0x6B << 1, 0x28, 1, buffer, 6, HAL_MAX_DELAY);
+
+	   HAL_I2C_Mem_Read(&hi2c1, 0x6B << 1, 0x28, 1, buffer, 6, HAL_MAX_DELAY);
 
 	      // Combinar bytes (little-endian)
-	      acc_x = (int16_t)(buffer[1] << 8 | buffer[0]);
+	     /*
+	      *  acc_x = (int16_t)(buffer[1] << 8 | buffer[0]);
 	      acc_y = (int16_t)(buffer[3] << 8 | buffer[2]);
 	      acc_z = (int16_t)(buffer[5] << 8 | buffer[4]);
 
@@ -177,6 +201,21 @@ int main(void)
 	      printf("X:%.3f Y:%.3f Z:%.3f\r\n", acc_x_g, acc_y_g, acc_z_g);
 
 	      HAL_Delay(100); // 10 Hz
+	      *
+	      */
+
+
+
+	      if (gps_line_ready)
+	          {
+	              printf("GPS: %s\r\n", gps_line_buffer); // también sale por USART2, pero los datos vienen de USART1
+	              gps_line_ready = 0;
+	          }
+
+	          HAL_Delay(100);
+
+
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -266,6 +305,39 @@ static void MX_I2C1_Init(void)
 }
 
 /**
+  * @brief USART1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_USART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 9600;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
+
+}
+
+/**
   * @brief USART2 Initialization Function
   * @param None
   * @retval None
@@ -339,6 +411,24 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART1)//en caso de que salte otra interrupción que no sea la que busco
+    {
+        if (gps_rx_byte == '\n' || gps_line_index >= sizeof(gps_line_buffer) - 1) //comprobar si ha termninaod
+        {
+            gps_line_buffer[gps_line_index] = '\0';
+            gps_line_ready = 1;
+            gps_line_index = 0;
+        }
+        else if (gps_rx_byte != '\r')
+        {
+            gps_line_buffer[gps_line_index++] = gps_rx_byte;
+        }
+
+        HAL_UART_Receive_IT(&huart1, &gps_rx_byte, 1);
+    }
+}
 /* USER CODE END 4 */
 
 /**
