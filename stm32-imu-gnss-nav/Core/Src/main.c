@@ -61,8 +61,12 @@ char    uart_buf[64];
 /* ------------------------Variables glovales para el GPS ----------------------------------------- */
 uint8_t gps_rx_byte;
 char gps_line_buffer[100];
-uint8_t gps_line_index = 0;
-volatile uint8_t gps_line_ready = 0; //Necesario que sea volatile
+char gps_buf_A[100];
+char gps_buf_B[100];
+char *gps_fill    = gps_buf_A;  // buffer para rellenar en al interrupción
+char *gps_display = gps_buf_B;  // buffer para imprimir
+uint8_t gps_line_index = 0; // El contador que va a hacer de puntero
+volatile uint8_t gps_line_ready = 0;  //Necesario que sea volatile
 /* ------------------------Variables glovales para el IMU ----------------------------------------- */
 
 
@@ -208,7 +212,7 @@ int main(void)
 
 	      if (gps_line_ready)
 	          {
-	              printf("GPS: %s\r\n", gps_line_buffer); // también sale por USART2, pero los datos vienen de USART1
+	              printf("GPS: %s\r\n", gps_display); // también sale por USART2, pero los datos vienen de USART1
 	              gps_line_ready = 0;
 	          }
 
@@ -418,6 +422,13 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         if (gps_rx_byte == '\n' || gps_line_index >= sizeof(gps_line_buffer) - 1) //comprobar si ha termninaod
         {
             gps_line_buffer[gps_line_index] = '\0';
+
+            //Intercambio los displays para poder seguir escribiendo he imprimiendo sin problemas
+
+            char *tmp = gps_display;
+            gps_display = gps_fill;
+            gps_fill = tmp;
+
             gps_line_ready = 1;
             gps_line_index = 0;
         }
