@@ -22,6 +22,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "stdio.h"
+#include <string.h>   // para strncmp
+#include <stdlib.h>   // para atof, atoi
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -67,6 +69,19 @@ char *gps_fill    = gps_buf_A;  // buffer para rellenar en al interrupción
 char *gps_display = gps_buf_B;  // buffer para imprimir
 uint8_t gps_line_index = 0; // El contador que va a hacer de puntero
 volatile uint8_t gps_line_ready = 0;  //Necesario que sea volatile
+
+typedef struct {
+    uint8_t  valido;       // 1 si el fix es válido, 0 si no
+    double   latitud;      // en grados decimales, positivo = Norte
+    double   longitud;     // en grados decimales, positivo = Este
+    float    altitud;      // metros sobre el nivel del mar
+    uint8_t  num_satelites;
+    float    hdop;
+} GPS_Fix_t;
+
+GPS_Fix_t gps_fix = {0}; // arranca todo a cero/inválido
+
+
 /* ------------------------Variables glovales para el IMU ----------------------------------------- */
 
 
@@ -81,7 +96,9 @@ static void MX_I2C1_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_USART1_UART_Init(void);
 /* USER CODE BEGIN PFP */
-
+int trocear_gga(char *sentence, char *campos[], int max_campos);
+double nmea_a_decimal(const char *campo, char direccion);
+void parsear_gngga(char *trama);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -212,11 +229,25 @@ int main(void)
 
 	      if (gps_line_ready)
 	          {
-	              printf("GPS: %s\r\n", gps_display); // también sale por USART2, pero los datos vienen de USART1
-	              gps_line_ready = 0;
+	              //printf("GPS: %s\r\n", gps_display); // también sale por USART2, pero los datos vienen de USART1
+	    	  parsear_gngga(gps_display);
+
+	    	      if (gps_fix.valido)
+	    	      {
+	    	          printf("POS: lat=%.6f lon=%.6f alt=%.1fm sat=%d hdop=%.2f\r\n",
+	    	                 gps_fix.latitud, gps_fix.longitud,
+	    	                 gps_fix.altitud, gps_fix.num_satelites, gps_fix.hdop);
+	    	      }
+	    	      else
+	    	      {
+	    	          printf("GPS: sin fix\r\n");
+	    	      }
+
+
+	    	  gps_line_ready = 0;
 	          }
 
-	          HAL_Delay(100);
+	          HAL_Delay(1000);
 
 
 
@@ -419,27 +450,99 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1)//en caso de que salte otra interrupción que no sea la que busco
     {
-        if (gps_rx_byte == '\n' || gps_line_index >= sizeof(gps_line_buffer) - 1) //comprobar si ha termninaod
-        {
-            gps_line_buffer[gps_line_index] = '\0';
+    	if (gps_rx_byte == '\n' || gps_line_index >= 99)
+    		{
+    	     gps_fill[gps_line_index] = '\0';
 
-            //Intercambio los displays para poder seguir escribiendo he imprimiendo sin problemas
+    	     char *tmp = gps_display;
+    	     gps_display = gps_fill;
+    	     gps_fill = tmp;
 
-            char *tmp = gps_display;
-            gps_display = gps_fill;
-            gps_fill = tmp;
-
-            gps_line_ready = 1;
-            gps_line_index = 0;
-        }
-        else if (gps_rx_byte != '\r')
-        {
-            gps_line_buffer[gps_line_index++] = gps_rx_byte;
-        }
+    	     gps_line_ready = 1;
+    	     gps_line_index = 0;
+    	    }
+    	else if (gps_rx_byte != '\r')
+    	    {
+    	    gps_fill[gps_line_index++] = gps_rx_byte;
+    	    }
 
         HAL_UART_Receive_IT(&huart1, &gps_rx_byte, 1);
     }
 }
+
+
+
+#define GGA_MAX_CAMPOS 16
+
+// Divide 'sentence' por comas (y corta en el '*' del checksum).
+// Modifica la propia cadena metiendo '\0' donde había comas.
+// Devuelve cuántos campos encontró, y los deja en el array 'campos'.
+int trocear_gga(char *sentence, char *campos[], int max_campos)
+{
+    int n = 0;
+    campos[n++] = sentence;
+
+    for (char *p = sentence; *p != '\0'; p++)
+    {
+        if (*p == ',' )
+        {
+            *p = '\0';
+            if (n < max_campos) campos[n++] = p + 1;
+        }
+        else if (*p == '*')
+        {
+            *p = '\0'; // cortamos aquí, ya no nos interesa el checksum
+            break;
+        }
+    }
+    return n;
+}
+
+//Conversión de valores GPS nmea a Decimal
+double nmea_a_decimal(const char *campo, char direccion)
+{
+    if (campo[0] == '\0') return 0.0; // campo vacío, sin dato
+
+    double valor_bruto = atof(campo);           // ej: 3723.13571
+    int grados = (int)(valor_bruto / 100);       // ej: 37
+    double minutos = valor_bruto - (grados * 100); // ej: 23.13571
+
+    double decimal = grados + (minutos / 60.0);  // ej: 37.3856...
+
+    if (direccion == 'S' || direccion == 'W')
+        decimal = -decimal; // Sur y Oeste son negativos por convención
+
+    return decimal;
+
+}
+
+//Parseador principal de la trama gngga
+void parsear_gngga(char *trama)
+{
+    // Comprobamos que sea efectivamente una trama GGA antes de tocar nada
+    if (strncmp(trama, "$GNGGA", 6) != 0) return;
+
+    char *campos[GGA_MAX_CAMPOS];
+    int n = trocear_gga(trama, campos, GGA_MAX_CAMPOS);
+
+    if (n < 10) return; // trama incompleta o corrupta, descartamos
+
+    // Índices según el formato: $GNGGA,hora,lat,N/S,lon,E/W,fix,nsat,hdop,alt,...
+    int fix_quality = atoi(campos[6]);
+
+    gps_fix.valido = (fix_quality > 0) ? 1 : 0;
+
+    if (gps_fix.valido)
+    {
+        gps_fix.latitud       = nmea_a_decimal(campos[2], campos[3][0]);
+        gps_fix.longitud      = nmea_a_decimal(campos[4], campos[5][0]);
+        gps_fix.num_satelites = (uint8_t)atoi(campos[7]);
+        gps_fix.hdop          = atof(campos[8]);
+        gps_fix.altitud       = atof(campos[9]);
+    }
+}
+
+
 /* USER CODE END 4 */
 
 /**

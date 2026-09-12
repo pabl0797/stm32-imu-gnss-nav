@@ -60,8 +60,8 @@ all: main-build
 main-build: stm32-imu-gnss-nav.elf secondary-outputs
 
 # Tool invocations
-stm32-imu-gnss-nav.elf stm32-imu-gnss-nav.map: $(OBJS) $(USER_OBJS) C:\Users\Ph0enix\Desktop\Proyecto\ GPS\stm32-imu-gnss-nav\stm32-imu-gnss-nav\STM32F446RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "stm32-imu-gnss-nav.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\Ph0enix\Desktop\Proyecto GPS\stm32-imu-gnss-nav\stm32-imu-gnss-nav\STM32F446RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="stm32-imu-gnss-nav.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -u _scanf_float -Wl,--start-group -lc -lm -Wl,--end-group
+stm32-imu-gnss-nav.elf stm32-imu-gnss-nav.map: $(OBJS) $(USER_OBJS) C:\Users\34606\Desktop\proyecto\ gps\stm32-imu-gnss-nav\stm32-imu-gnss-nav\STM32F446RETX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "stm32-imu-gnss-nav.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"C:\Users\34606\Desktop\proyecto gps\stm32-imu-gnss-nav\stm32-imu-gnss-nav\STM32F446RETX_FLASH.ld" --specs=nosys.specs -Wl,-Map="stm32-imu-gnss-nav.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -u _scanf_float -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 
