@@ -89,13 +89,14 @@ GPS_Fix_t gps_fix = {0}; // arranca todo a cero/inválido
 
 /* USER CODE END PV */
 
+
+/* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_USART1_UART_Init(void);
-/* USER CODE BEGIN PFP */
 int trocear_gga(char *sentence, char *campos[], int max_campos);
 double nmea_a_decimal(const char *campo, char direccion);
 void parsear_gngga(char *trama);
