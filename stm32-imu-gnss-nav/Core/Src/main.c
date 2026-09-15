@@ -77,9 +77,12 @@ typedef struct {
     float    altitud;      // metros sobre el nivel del mar
     uint8_t  num_satelites;
     float    hdop;
-} GPS_Fix_t;
+    char     hora[12];          // hhmmss.ss
+    float    velocidad_kmh;   // de RMC
+    float    rumbo;             // grados respecto al norte, de RMC
 
-GPS_Fix_t gps_fix = {0}; // arranca todo a cero/inválido
+} GPS_Fix_t;
+GPS_Fix_t gps_fix = {0};
 
 
 /* ------------------------Variables glovales para el IMU ----------------------------------------- */
@@ -99,14 +102,16 @@ static void MX_USART2_UART_Init(void);
 static void MX_USART1_UART_Init(void);
 int trocear_gga(char *sentence, char *campos[], int max_campos);
 double nmea_a_decimal(const char *campo, char direccion);
-void parsear_gngga(char *trama);
+uint8_t parsear_gngga(char *trama);   // antes: void parsear_gngga(char *trama);
+uint8_t parsear_gnrmc(char *trama);
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-/*
- * -----------------------------------codigo completamente necesaro para poder usar printf()---------------------------------------------------------
- */
+
+ //-----------------------------------codigo completamente necesaro para poder usar printf()---------------------------------------------------------
+
 #ifdef __GNUC__
 #define PUTCHAR_PROTOTYPE int __io_putchar(int ch)
 #else
@@ -119,9 +124,9 @@ PUTCHAR_PROTOTYPE
 HAL_UART_Transmit(&huart2, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
 return ch;
 }
-/*
- * -----------------------------------codigo completamente necesaro para poder usar printf()---------------------------------------------------------
- */
+
+ //-----------------------------------codigo completamente necesaro para poder usar printf()---------------------------------------------------------
+
 
 /* USER CODE END 0 */
 
@@ -208,6 +213,7 @@ int main(void)
 
 	   HAL_I2C_Mem_Read(&hi2c1, 0x6B << 1, 0x28, 1, buffer, 6, HAL_MAX_DELAY);
 
+	   //prueba lectura de acelerómetro
 	      // Combinar bytes (little-endian)
 	     /*
 	      *  acc_x = (int16_t)(buffer[1] << 8 | buffer[0]);
@@ -228,34 +234,38 @@ int main(void)
 
 
 
-	      if (gps_line_ready)
-	          {
-	              //printf("GPS: %s\r\n", gps_display); // también sale por USART2, pero los datos vienen de USART1
-	    	  parsear_gngga(gps_display);
+	   if (gps_line_ready)
+	   {
+	       if (parsear_gngga(gps_display))          // <-- SOLO entra si de verdad era GGA
+	       {
+	           if (gps_fix.valido)
+	           {
+	               printf("POS[%s]: lat=%.6f lon=%.6f alt=%.1fm sat=%d hdop=%.2f\r\n",
+	                      gps_fix.hora, gps_fix.latitud, gps_fix.longitud,
+	                      gps_fix.altitud, gps_fix.num_satelites, gps_fix.hdop);
+	           }
+	           else
+	           {
+	               printf("GPS[%s]: sin fix\r\n", gps_fix.hora);
+	           }
+	       }
+	       else if (parsear_gnrmc(gps_display))     // <-- ahora SÍ se evalúa cada línea, no solo cuando gps_line_ready es falso
+	       {
+	           printf("MOV: vel=%.2f km/h rumbo=%.1f grados\r\n",
+	                  gps_fix.velocidad_kmh, gps_fix.rumbo);
+	       }
 
-	    	      if (gps_fix.valido)
-	    	      {
-	    	          printf("POS: lat=%.6f lon=%.6f alt=%.1fm sat=%d hdop=%.2f\r\n",
-	    	                 gps_fix.latitud, gps_fix.longitud,
-	    	                 gps_fix.altitud, gps_fix.num_satelites, gps_fix.hdop);
-	    	      }
-	    	      else
-	    	      {
-	    	          printf("GPS: sin fix\r\n");
-	    	      }
+	       gps_line_ready = 0;
+	   }
 
+	         // HAL_Delay(1000);
 
-	    	  gps_line_ready = 0;
-	          }
-
-	          HAL_Delay(1000);
-
-
+  }
 
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+
   /* USER CODE END 3 */
 }
 
@@ -518,20 +528,19 @@ double nmea_a_decimal(const char *campo, char direccion)
 }
 
 //Parseador principal de la trama gngga
-void parsear_gngga(char *trama)
+uint8_t parsear_gngga(char *trama)   // antes: void
 {
-    // Comprobamos que sea efectivamente una trama GGA antes de tocar nada
-    if (strncmp(trama, "$GNGGA", 6) != 0) return;
+    if (strncmp(trama, "$GNGGA", 6) != 0) return 0;   // antes: return; (a secas)
 
     char *campos[GGA_MAX_CAMPOS];
     int n = trocear_gga(trama, campos, GGA_MAX_CAMPOS);
+    if (n < 10) return 0;   // antes: return;
 
-    if (n < 10) return; // trama incompleta o corrupta, descartamos
-
-    // Índices según el formato: $GNGGA,hora,lat,N/S,lon,E/W,fix,nsat,hdop,alt,...
     int fix_quality = atoi(campos[6]);
-
     gps_fix.valido = (fix_quality > 0) ? 1 : 0;
+
+    strncpy(gps_fix.hora, campos[1], sizeof(gps_fix.hora) - 1);
+    gps_fix.hora[sizeof(gps_fix.hora) - 1] = '\0';
 
     if (gps_fix.valido)
     {
@@ -541,6 +550,25 @@ void parsear_gngga(char *trama)
         gps_fix.hdop          = atof(campos[8]);
         gps_fix.altitud       = atof(campos[9]);
     }
+
+    return 1;   // <-- NUEVO: confirma que sí era GGA y se procesó
+}
+uint8_t parsear_gnrmc(char *trama)
+{
+    if (strncmp(trama, "$GNRMC", 6) != 0) return 0;
+
+    char *campos[GGA_MAX_CAMPOS];
+    int n = trocear_gga(trama, campos, GGA_MAX_CAMPOS);
+    if (n < 8) return 0;
+
+    if (campos[2][0] == 'A')
+    {
+        float velocidad_nudos = atof(campos[7]);
+        gps_fix.velocidad_kmh = velocidad_nudos * 1.852f;   // <-- conversión aquí
+        gps_fix.rumbo         = (campos[8][0] != '\0') ? atof(campos[8]) : 0.0f;
+    }
+
+    return 1;
 }
 
 
